@@ -1,0 +1,12 @@
+{
+  "id": "dsh-better-chat-history",
+  "version": "0.1.0",
+  "main": "./lib/index.js",
+  "engines": {
+    "dsh": ">=0.1.0-rc.6"
+  },
+  "contributes": {
+    "tools": [],
+    "skills": []
+  }
+}
