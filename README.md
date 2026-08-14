@@ -90,6 +90,10 @@ profile patch 中给 `io-optimizer` 行加 config 覆盖：
 - 崩溃丢失窗口：最近 ~2s 的日志事件、合并窗口内的投影缓存更新——均符合原设计语义；
 - 插件可在 HMR / 重载时恢复原始方法（`ctx.effect` disposer + 防重复包装标志）。
 
+## 🤖 AIGC 声明
+
+本项目部分代码与文档由 AI 辅助生成，并经过人工审查与测试。项目按 MIT 许可证开源，仅供学习与参考；使用者请自行评估代码的安全性与合规性。
+
 ## 🔗 相关插件
 
 - [dsh-go-rotator](https://github.com/echo-xianyu/dsh-go-rotator) —— OpenCode Go 订阅 key 轮换器
