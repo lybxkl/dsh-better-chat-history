@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.5 — 字段标 volatile，设置页才有东西可填
+
+- **根因**：DSH 的 settings 服务只把插件 Config 里声明了 `.volatile()` 的字段投影成表单
+  （`volatileForm()` 对没有 volatile 字段的 schema 直接返回 undefined，那一行会被整条跳过），
+  写入时每个路径还必须落在 volatile 节点下（否则 `Config field "x" is not volatile`）。
+  0.3.0–0.3.4 的六个字段都没有标 volatile，所以无论客户端怎么认领命名空间，设置页都拿不到配置——
+  这就是「设置里点了却是空的」的真正原因。
+- **六个字段全部 `.volatile()`**：设置侧栏分节与插件页配置页现在都有内容可填。
+- **热更新**：volatile 改动的语义是宿主不重挂插件、原位更新配置引用并发 `loader/volatile-update`
+  （见 vendor/loader README）。插件监听该事件重新读一次配置，改完立即生效，不再等重启；
+  `apply()` 收到的配置若带 cosmokit 的 volatile 引用，`unwrapVolatile` 会逐字段拆包，
+  避免把 `{ get() }` 当数字用。
+- 客户端保存提示从「插件正在重启」改为「已保存，立即生效」；冒烟测试补上引用拆包与热更新两组断言。
+
 ## 0.3.4 — 按字段形状认领配置节
 
 - **修 0.3.3 的设置页落到「没有找到配置项」**：bundle patch 插入的行，其 Settings 命名空间

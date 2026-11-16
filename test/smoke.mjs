@@ -9,7 +9,7 @@
 //
 // 运行：node test/smoke.mjs
 import assert from "node:assert/strict";
-import { apply, stats } from "../lib/index.js";
+import { apply, normalizeConfig, stats, unwrapVolatile } from "../lib/index.js";
 
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -252,5 +252,42 @@ await dh1.close();
 await dh2.close();
 assert.equal(dedupeService.readCount("d"), 1, "并发同会话只应解码一次");
 
+const finalStats = stats();
+
+// ── 14) volatile 引用拆包（宿主热更新时会塞 createVolatile 引用进来）────
+const fakeRef = () => {
+  let current = 0;
+  const write = Symbol("write");
+  return Object.freeze({ get: () => current, [write]: (value) => { current = value; } });
+};
+const ref = fakeRef();
+assert.equal(unwrapVolatile(ref), 0, "只带 get() 的引用要被拆开");
+assert.equal(unwrapVolatile(6), 6, "普通数字原样返回");
+assert.equal(unwrapVolatile(null), null, "null 原样返回");
+
+const mixed = unwrapVolatile({ get: () => 1, other: 2 });
+assert.equal(typeof mixed, "object", "带其它数据键的对象不当引用拆（可能真是数据）");
+
+const volatileCfg = normalizeConfig({
+  readCacheSessions: unwrapVolatile(ref),
+  readCacheSessionMb: 16,
+});
+assert.equal(volatileCfg.readCacheSessions, 0, "引用拆包后参与归一");
+assert.equal(volatileCfg.readCacheSessionBytes, 16 * 1024 * 1024, "MB 字段仍然换算成字节");
+
+// ── 15) 热更新事件：收到 loader/volatile-update 后换用新配置 ──────────
+let liveConfig = { readCacheSessions: 2, warmSessions: 0 };
+const listeners = new Map();
+const liveCtx = {
+  get: () => undefined,
+  on(event, listener) { listeners.set(event, listener); },
+  logger: { info() {}, warn() {}, error() {}, debug() {} },
+};
+apply(liveCtx, liveConfig);
+assert.ok(listeners.has("loader/volatile-update"), "要监听热更新事件");
+liveConfig = { readCacheSessions: 5, warmSessions: 0 };
+listeners.get("loader/volatile-update")();
+assert.ok(true, "热更新回调不应抛错");
+
 console.log("✅ smoke: 所有断言通过");
-console.log("   stats:", JSON.stringify(stats()));
+console.log("   stats:", JSON.stringify(finalStats));
