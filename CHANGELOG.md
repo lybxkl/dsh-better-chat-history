@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.7 — schema 解析不再依赖安装位置
+
+- **根因确认**：诊断文件显示，从 profile 直接加载时 `schema=ok:self`、`Config` 成立、entry 是
+  `io-optimizer`、`settings.describe()` 的 34 个配置节里**有** `io-optimizer`；而以 github 方式
+  装进 pnpm store 时，模块从 `.pnpm/<hash>/...` 的真实路径加载，`createRequire(import.meta.url)`
+  找不到 profile 里的 `@deepseek-ai/schemastery`，`Config` 就成了 undefined，
+  DSH 那边显示 `status: absent`，设置页自然没有内容。安装方式换了，表现就跟着变——这就是
+  「重启后又没了」的全部原因。
+- **修法**：schema 按 `import.meta.url` → `cwd` → Electron `app.asar`（带 `dsh/` 前缀两种）→
+  **逐个 profile 的 `node_modules`** 依次尝试，并记住是哪条基准成功。最后一条与安装方式无关，
+  github / 本地 link / 商店 三种装法都能拿到 schemastery。
+- 去掉 0.3.6 里那个 10 秒 `describe()` 探针（已确认设置服务能看到本插件），只留启动一行诊断。
+
 ## 0.3.6 — 诊断探针（临时）
 
 - 运行期实测：`Config` 没被 DSH 认到（Config inspect 报 `absent`），但同样代码脱离 DSH
