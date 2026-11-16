@@ -1,6 +1,6 @@
 {
   "name": "dsh-better-chat-history",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "更好的聊天记录加载 —— DeepSeek Harness 会话 I/O 优化插件。兼容 DSH 0.2.2-rc.3+：包装 sessionPersistence.open() 的只读路径，用 revision 校验的 LRU 读缓存消除切换会话时的 JSONL 全量冷读（zstd 逐帧解压 + JSON 解析）。自带设置面板。",
   "license": "MIT",
   "type": "module",

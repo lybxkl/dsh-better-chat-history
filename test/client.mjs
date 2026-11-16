@@ -185,6 +185,29 @@ assert.ok(serialized.includes("readCacheSessions"), "表单里应包含字段");
 const fieldCount = (serialized.match(/"io-opt-/g) ?? []).length;
 assert.equal(fieldCount, 14, "七个字段都要渲染出来（label htmlFor + input id 各一处）");
 
+// 老配置只有毫秒键时，表单要按秒显示（与 Host 端换算一致）。
+const legacySnapshot = {
+  status: "ready",
+  value: { readCacheSessions: 5, readCacheTtlMs: 130000, listCacheTtlMs: 45000, warmDelayMs: 7000 },
+  revision: 1,
+  writable: true,
+};
+const legacyForms = {
+  describe: () => ({
+    getSnapshot: () => ({ status: "ready", view: { namespaces: [{ ns: "io-optimizer" }], writable: true } }),
+    subscribe: () => () => {},
+  }),
+  get: () => ({ getSnapshot: () => legacySnapshot, subscribe: () => () => {}, mutate: () => true }),
+};
+const legacySection = SettingsSection({ forms: legacyForms, t: injected.t });
+assert.equal(typeof legacySection.type, "function", "老配置也要能解析出控制器");
+const legacySerialized = JSON.stringify(
+  legacySection.type({ state: legacySnapshot, mutate: legacySection.props.mutate, formT: undefined }),
+);
+for (const expected of ['"value":"130"', '"value":"45"', '"value":"7"']) {
+  assert.ok(legacySerialized.includes(expected), `毫秒旧值要换算成秒显示（缺 ${expected}）`);
+}
+
 // 保存经控制器走，带 revision
 assert.equal(await section.props.mutate([{ op: "set", path: ["warmSessions"], value: 4 }], snapshot.revision), true);
 assert.deepEqual(mutations.at(-1), { ops: [{ op: "set", path: ["warmSessions"], value: 4 }], revision: 3 });
