@@ -395,3 +395,18 @@ console.log("   stats:", JSON.stringify(finalStats));
   await readThrough(backend, "race");
   assert.equal(backend.readCount("race"), 3, "归档后缓存清空，重新读取");
 }
+
+// ── 19) live 会话不预热（对正在写入的会话 open 要等写锁）─────────
+{
+  const backend = makeBackend({ live1: [{ seq: 1 }] });
+  const query = { observeSession: (id) => ({ id }), readSession: async (id) => ({ id }) };
+  const { ctx } = makeCtx(backend, { sessions: { get: (id) => (id === "live1" ? { id } : undefined) } });
+  ctx.inject = (_names, callback) => {
+    callback({ sessionQuery: query });
+    return () => {};
+  };
+  apply(ctx, { warmSessions: 0, readCacheSessions: 4 });
+  await query.observeSession("live1");
+  await tick(60);
+  assert.equal(backend.readCount("live1"), 0, "live 会话不该被预热（不去抢写锁）");
+}
