@@ -152,7 +152,7 @@ assert.ok(String(hinted.props.children).includes("someone-else"), "认不出时�
 // 正常路径：从 describe 里认出 include:io-optimizer，渲染同一套字段
 const value = {
   readCacheSessions: 6, readCacheSessionMb: 8, readCacheSourceMb: 64,
-  listCacheTtlMs: 5000, warmSessions: 8, warmDelayMs: 15000,
+  listCacheSecs: 5, warmSessions: 8, warmDelaySecs: 15,
 };
 const snapshot = { status: "ready", value, revision: 3, writable: true };
 const mutations = [];
@@ -193,7 +193,7 @@ assert.deepEqual(mutations.at(-1), { ops: [{ op: "set", path: ["warmSessions"], 
 let shapeNamespace;
 const shapeForms = {
   describe: () => ({
-    getSnapshot: () => ({ status: "ready", view: { namespaces: [{ ns: "totally-different-id", value: { warmDelayMs: 15000 } }], writable: true } }),
+    getSnapshot: () => ({ status: "ready", view: { namespaces: [{ ns: "totally-different-id", value: { warmDelaySecs: 15 } }], writable: true } }),
     subscribe: () => () => {},
   }),
   get(ns) {

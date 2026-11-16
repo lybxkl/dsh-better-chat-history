@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.2 — 时间类配置改用秒
+
+设置页里所有时间类配置项从毫秒改成秒，填 600 就是 10 分钟，不用再数零：
+
+- `readCacheTtlMs` → `readCacheTtlSecs`（默认 600 秒 = 10 分钟）
+- `listCacheTtlMs` → `listCacheSecs`（默认 5 秒）
+- `warmDelayMs` → `warmDelaySecs`（默认 15 秒）
+
+**升级兼容**：老配置里的毫秒键仍然认。`normalizeConfig` 在新键缺席时按 1 秒 = 1000 毫秒换算，
+换算完再把旧键从归一结果里去掉，设置页只显示新键；新旧同时存在时以新键为准。
+内部调度用的 `warmIntervalMs`（400 毫秒）与写合并的 `coalesceMs` 不是用户配置，保持毫秒、不进 schema。
 ## 0.4.1 — 全量复查后的修补
 
 复查了 host 半个插件与浏览器半个插件，修掉以下问题（均为实现细节，接口不变）：

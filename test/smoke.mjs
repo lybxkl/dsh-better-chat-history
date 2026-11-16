@@ -125,7 +125,7 @@ async function readThrough(service, id) {
 const events = Array.from({ length: 10 }, (_, i) => ({ seq: i, type: "user/message" }));
 const service = makeBackend({ s1: events, s2: events.slice(0, 3) });
 const { ctx } = makeCtx(service);
-apply(ctx, { warmSessions: 0, listCacheTtlMs: 50 });
+apply(ctx, { warmSessions: 0, listCacheSecs: 0.05 });
 
 // ── 1) 首次 open 读盘，第二次必须命中缓存 ────────────────────
 const r1 = await readThrough(service, "s1");
@@ -170,7 +170,7 @@ assert.ok(listedA[0].header.id, "list 返回 snapshot.header.id");
 // ── 7) 预热必须用 snapshot.header.id ────────────────────────
 const warmService = makeBackend({ a: events, b: events });
 const { ctx: warmCtx } = makeCtx(warmService);
-apply(warmCtx, { warmSessions: 2, warmDelayMs: 5, warmIntervalMs: 1, readCacheSessions: 4 });
+apply(warmCtx, { warmSessions: 2, warmDelaySecs: 0.005, warmIntervalMs: 1, readCacheSessions: 4 });
 await tick(100);
 const warmStats = stats();
 assert.ok(warmStats.warmLoaded === 2, `预热计数应为 2，实际 ${warmStats.warmLoaded}`);
@@ -278,6 +278,14 @@ const volatileCfg = normalizeConfig({
 assert.equal(volatileCfg.readCacheSessions, 0, "引用拆包后参与归一");
 assert.equal(volatileCfg.readCacheSessionBytes, 16 * 1024 * 1024, "MB 字段仍然换算成字节");
 
+// 老配置里的毫秒字段按 1 秒 = 1000 毫秒换算，且不残留旧键（升级兼容）。
+const legacyMs = normalizeConfig({ readCacheTtlMs: 600000, listCacheTtlMs: 5000, warmDelayMs: 15000 });
+assert.equal(legacyMs.readCacheTtlSecs, 600, "毫秒 TTL 换算成秒");
+assert.equal(legacyMs.listCacheSecs, 5, "毫秒列表缓存换算成秒");
+assert.equal(legacyMs.warmDelaySecs, 15, "毫秒预热延迟换算成秒");
+assert.equal(legacyMs.readCacheTtlMs, undefined, "旧键不该留在归一结果里");
+const bothKeys = normalizeConfig({ readCacheTtlSecs: 30, readCacheTtlMs: 600000 });
+assert.equal(bothKeys.readCacheTtlSecs, 30, "新旧同时存在时以新字段为准");
 // ── 15) 热更新事件：收到 loader/volatile-update 后换用新配置 ──────────
 let liveConfig = { readCacheSessions: 2, warmSessions: 0 };
 const listeners = new Map();
@@ -295,7 +303,7 @@ assert.ok(true, "热更新回调不应抛错");
 // ── 16) 空闲过期：闲置超过 TTL 后必须重新解码 ──────────────────
 const ttlService = makeBackend({ t: events });
 const { ctx: ttlCtx } = makeCtx(ttlService);
-apply(ttlCtx, { warmSessions: 0, readCacheTtlMs: 20 });
+apply(ttlCtx, { warmSessions: 0, readCacheTtlSecs: 0.02 });
 const ttlFirst = await ttlService.open("t", "read");
 await ttlFirst.read(0);
 await ttlFirst.close();
@@ -309,7 +317,7 @@ assert.ok(stats().expired >= 1, "过期要计入 stats.expired");
 // ── 17) 淘汰策略：超出会话数预算时按 LRU 丢弃最久没用的 ────────
 const evictService = makeBackend({ e1: events, e2: events });
 const { ctx: evictCtx } = makeCtx(evictService);
-apply(evictCtx, { warmSessions: 0, readCacheSessions: 1, readCacheTtlMs: 0 });
+apply(evictCtx, { warmSessions: 0, readCacheSessions: 1, readCacheTtlSecs: 0 });
 const evictFirst = await evictService.open("e1", "read");
 await evictFirst.read(0);
 await evictFirst.close();

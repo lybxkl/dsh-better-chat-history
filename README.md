@@ -97,12 +97,12 @@ dsh plugin --profile <profile> add ./dsh-better-chat-history
 |---|---|---|
 | `readCacheSessions` | `6` | 最多缓存几个会话（0 关闭读缓存） |
 | `readCacheSourceMb` | `64` | 缓存会话的源文件总预算（MB）；旧名 `readCacheSourceBytes` 仍可用 |
-| `readCacheTtlMs` | `600000` | 日志缓存的**空闲**过期时间（毫秒）：这么久没被读到就丢弃，0 = 永不过期 |
+| `readCacheTtlSecs` | `600` | 日志缓存的**空闲**过期时间（**秒**）：这么久没被读到就丢弃，0 = 永不过期 |
 | `readCacheSessionMb` | `8` | 单个会话的源文件上限（MB），超过就不缓存（避免大对象驻留）；旧名 `readCacheSessionBytes` 仍可用 |
-| `listCacheTtlMs` | `5000` | 会话列表缓存 TTL |
+| `listCacheSecs` | `5` | 会话列表缓存 TTL（秒，0 = 不缓存） |
 | `warmSessions` | `8` | 启动后预热的最近会话数（0 关闭） |
-| `warmDelayMs` | `15000` | 预热开始延迟（避开启动高峰） |
-| `warmIntervalMs` | `400` | 每两个会话之间的预热间隔 |
+| `warmDelaySecs` | `15` | 预热开始延迟（秒，避开启动高峰） |
+| `warmIntervalMs` | `400` | 内部调度：每两个会话之间的预热间隔（毫秒，不进设置页） |
 | `coalesceUnits` / `coalesceMs` | — | 旧版写合并用；rc.3 上无挂点，自动跳过 |
 
 ## 🛡️ 语义安全
