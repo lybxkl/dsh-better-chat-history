@@ -180,7 +180,7 @@ assert.equal(tree.props["data-io-optimizer-form"], true, "表单根节点带标�
 const serialized = JSON.stringify(tree);
 assert.ok(serialized.includes("readCacheSessions"), "表单里应包含字段");
 const fieldCount = (serialized.match(/"io-opt-/g) ?? []).length;
-assert.equal(fieldCount, 12, "六个字段都要渲染出来（label htmlFor + input id 各一处）");
+assert.equal(fieldCount, 14, "七个字段都要渲染出来（label htmlFor + input id 各一处）");
 
 // 保存经控制器走，带 revision
 assert.equal(await section.props.mutate([{ op: "set", path: ["warmSessions"], value: 4 }], snapshot.revision), true);

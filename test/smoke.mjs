@@ -289,5 +289,32 @@ liveConfig = { readCacheSessions: 5, warmSessions: 0 };
 listeners.get("loader/volatile-update")();
 assert.ok(true, "热更新回调不应抛错");
 
+// ── 16) 空闲过期：闲置超过 TTL 后必须重新解码 ──────────────────
+const ttlService = makeBackend({ t: events });
+const { ctx: ttlCtx } = makeCtx(ttlService);
+apply(ttlCtx, { warmSessions: 0, readCacheTtlMs: 20 });
+const ttlFirst = await ttlService.open("t", "read");
+await ttlFirst.read(0);
+await ttlFirst.close();
+await new Promise((resolve) => setTimeout(resolve, 60));
+const ttlSecond = await ttlService.open("t", "read");
+await ttlSecond.read(0);
+await ttlSecond.close();
+assert.equal(ttlService.readCount("t"), 2, "空闲过期之后必须重新解码");
+assert.ok(stats().expired >= 1, "过期要计入 stats.expired");
+
+// ── 17) 淘汰策略：超出会话数预算时按 LRU 丢弃最久没用的 ────────
+const evictService = makeBackend({ e1: events, e2: events });
+const { ctx: evictCtx } = makeCtx(evictService);
+apply(evictCtx, { warmSessions: 0, readCacheSessions: 1, readCacheTtlMs: 0 });
+const evictFirst = await evictService.open("e1", "read");
+await evictFirst.read(0);
+await evictFirst.close();
+const evictSecond = await evictService.open("e2", "read");
+await evictSecond.read(0);
+await evictSecond.close();
+assert.ok(stats().evicted >= 1, "超出会话数预算要淘汰旧的");
+assert.equal(stats().cachedSessions, 1, "淘汰后只剩预算内的条目");
+
 console.log("✅ smoke: 所有断言通过");
 console.log("   stats:", JSON.stringify(finalStats));
