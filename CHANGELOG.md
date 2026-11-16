@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 — 去掉 top-level await
+
+- 插件模块不再使用 `await import()`：schemastery 改为 `createRequire(import.meta.url)` 同步加载。
+  这样插件模块不依赖加载器用什么方式导入（静态 import / 动态 import / 将来的 CJS 兜底都成立），
+  同时让脱离 DSH 的单元测试不需要任何特殊处理。
 ## 0.3.1 — 设置面板的两处收尾
 
 - **旧配置不再被顶掉**：schema 原先给 MB 字段带了默认值，于是任何在 patch 里写了
