@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.0 — 切会话也进缓存
+
+**观察到的实情**：在界面里切会话，`sessionPersistence.open` 一次都不会被调用（`openHit/openMiss` 长期为 0），
+`sessionQuery.observeSession` 每次都在 1ms 内返回。原因是宿主里会话还没释放时会命中 live 快路径
+（`sessions.get(id)` 直接给内存对象），根本不解码日志。所以「切会话」原本没有可省的解码。
+
+因此这一版做两件事，让切会话也进缓存、也让标识对得上：
+
+- **切换即预热**：包装 `sessionQuery.observeSession` / `readSession`，切到某个会话后把它补进读缓存。
+  串行排队、一次一个；已在宿主内存里的会话跳过（再存一份纯属浪费内存）；超单会话上限的跳过。
+  这样「切过去 → 离开 → 再切回来」走的就是缓存，而不是重新解码。
+- **徽标认识 live**：`GET /io-optimizer/cache-state` 增加 `live` 字段（会话是否正挂在宿主内存里）。
+  徽标在 `cached` 或 `live` 时都显示：live 意味着切回来同样不用解码，只是它不需要额外副本。
 ## 0.5.2 — 徽标只留一句话
 
 体积从正文挪进 title：小会话只有几十 KB，正文写「1MB」会误导。正文只剩 `已缓存`，
