@@ -85,6 +85,17 @@ dsh plugin --profile <profile> add ./dsh-better-chat-history
 
 > 需要 dsh ≥ `0.2.2-rc.3`。在更老的版本上服务契约不同，请用 0.1.x。
 
+## 🔖 界面提示
+
+会话日志确实进了读缓存、且与磁盘版本一致时，输入框下方会显示一个绿点 + `已缓存 · 12MB`；
+没缓存（或缓存已被日志改动变成过期）就什么都不显示。数据来自插件自己的只读路由：
+
+```
+GET /io-optimizer/cache-state?sessionId=<id>
+→ { "ok": true, "cached": true, "fresh": true, "bytes": 12582912, "ageMs": 8300 }
+```
+
+`fresh` 用的是与读路径相同的 revision 比对，所以徽标一亮就代表「切回去不会重新解码」。
 ## ⚙️ 配置项
 
 两种改法，效果一样：

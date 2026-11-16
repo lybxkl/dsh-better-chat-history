@@ -27,7 +27,11 @@ const React = {
     return { type, props: { ...(props ?? {}), children } };
   },
   useState(initial) {
-    return [typeof initial === "function" ? initial() : initial, () => {}];
+    // 需要预置状态时（例如徽标的命中分支）由测试塞 React.__forced 覆盖初值一次。
+    const forced = React.__forced;
+    React.__forced = undefined;
+    const value = forced === undefined ? (typeof initial === "function" ? initial() : initial) : forced;
+    return [value, () => {}];
   },
   useEffect() {},
 };
@@ -95,8 +99,8 @@ plugin.apply(ctx);
 
 assert.deepEqual(
   registrations.map((item) => item.name),
-  ["plugins.row.config", "settings.section", "settings.section.icon"],
-  "三个槽位都要注册",
+  ["plugins.row.config", "settings.section", "settings.section.icon", "conversation.composer.dock"],
+  "四个槽位都要注册",
 );
 assert.ok(dictionaries[NS]?.zh && dictionaries[NS]?.en, "必须注册中英字典");
 assert.equal(effects.length, 1, "locale 注册要包在 effect 里，卸载时回收");
@@ -130,6 +134,21 @@ assert.equal(injected.t("save"), "保存", "注入的 t 走 locale");
 const SettingsSection = sectionRegistration.component;
 
 const iconRegistration = byName["settings.section.icon"];
+
+// ── 输入框下方的缓存徽标 ────────────────────────────────────
+const dockRegistration = byName["conversation.composer.dock"];
+assert.equal(dockRegistration.options.id, "io-optimizer-cache", "徽标占自己的 id，不动内置条目");
+assert.equal(dockRegistration.options.order, 95, "徽标排在用量之后");
+const CacheDock = dockRegistration.component;
+assert.equal(CacheDock({ sessionId: "s-1", t: injected.t }), null, "没有缓存数据时什么都不渲染");
+assert.equal(CacheDock({ sessionId: "", t: injected.t }), null, "没有会话 id 时不请求也不渲染");
+React.__forced = { bytes: 12 * 1048576 };
+const badge = CacheDock({ sessionId: "s-1", t: injected.t });
+assert.ok(badge !== null && badge.props["data-io-optimizer-cached"] === true, "命中缓存时渲染徽标");
+const badgeJson = JSON.stringify(badge);
+assert.ok(badgeJson.includes("已缓存"), "徽标文案走 locale");
+assert.ok(badgeJson.includes("12MB"), "徽标带体积提示");
+assert.equal(typeof badge.props.title, "string", "徽标要带说明性 title");
 assert.equal(iconRegistration.options.id, SECTION_ID, "图标 id 必须等于分节 id");
 const icon = iconRegistration.component({ size: 20, active: true });
 assert.equal(icon.type, "svg", "图标返回 svg");
