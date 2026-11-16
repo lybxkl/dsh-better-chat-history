@@ -1,6 +1,6 @@
 {
   "id": "dsh-better-chat-history",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "main": "./lib/index.js",
   "engines": {
     "dsh": ">=0.2.2-rc.3"
