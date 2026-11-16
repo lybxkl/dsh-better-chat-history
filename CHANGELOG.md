@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.3 — 设置侧栏里的独立分节
+
+- **不用再钻插件页**：注册 `settings.section`（id `better-chat-history`，排在「格式匠」之后的 27 位），
+  在 **设置 → 加载缓存** 里直接改六个参数；配套注册 `settings.section.icon`（同一 id，纯函数图标）。
+- **两条入口共用一套表单**：插件页那份 `props.form` 与设置页的 `ctx.configForms.get(ns)` 是同一个
+  `ConfigForm` 控制器，写入契约一致（`mutate(ops, revision)`），所以两处永远显示同一份值。
+- **命名空间现场解析**：bundle patch 的行 id 是 `io-optimizer`，但 Loader 可能登记成
+  `include:io-optimizer` 或 `<包名>#io-optimizer`。设置页按「精确候选 → 后缀匹配」认领，
+  认不出来时显示说明文字而不是空白页。
+- 服务缺失（ui-settings 未加载）与命名空间未 Serve 分别给出不同提示，都不抛错。
+- `test/client.mjs` 扩到三类断言组：三个槽位注册、`inject` 注入的 t、设置页三条渲染分支
+  （无服务 / 找不到配置 / 正常渲染六字段并带 revision 写入）。
+
 ## 0.3.2 — 去掉 top-level await
 
 - 插件模块不再使用 `await import()`：schemastery 改为 `createRequire(import.meta.url)` 同步加载。

@@ -2,9 +2,12 @@
 // 注册路径，确认
 //   1) 模块 id 与包名一致（dsh-client-modules 靠这个把 browser half 挂到 Loader 行上）；
 //   2) apply 会在 plugins.row.config 上注册，键为 `<包名>#<行 id>`；
-//   3) 没有 form 时降级成说明文字，而不是崩掉；
+//   3) 没有 form 时插件页降级成说明文字，而不是崩掉；
 //   4) view === 'summary' 时返回摘要；
-//   5) 有 form 时渲染出字段；保存只提交改过的字段，并带上 revision。
+//   5) 有 form 时渲染出字段；
+//   6) 设置侧栏分节 settings.section / settings.section.icon 用同一个 id 注册，
+//      label 走 locale；页面能从 ctx.configForms 解析出命名空间并渲染同一套字段；
+//      服务缺失 / 命名空间没被 Serve 时给的是说明文字，不是异常。
 //
 // 运行：node test/client.mjs
 import assert from "node:assert/strict";
@@ -45,6 +48,10 @@ await import(pathToFileURL(copy).href);
 assert.ok(loaded, "client.js 必须调用 window.__ModuleLoader__.load");
 assert.equal(loaded.id, "dsh-better-chat-history", "模块 id 必须等于包名");
 
+const ROW_KEY = "dsh-better-chat-history#io-optimizer";
+const SECTION_ID = "better-chat-history";
+const NS = "ioOptimizer";
+
 const plugin = loaded.factory((name) => {
   assert.equal(name, "react", "factory 只会 require('react')");
   return React;
@@ -55,6 +62,7 @@ assert.deepEqual(plugin.inject, ["slots", "locale"]);
 const registrations = [];
 const effects = [];
 const dictionaries = {};
+const services = {};
 const ctx = {
   slots: {
     inject(name, callback) {
@@ -69,6 +77,12 @@ const ctx = {
       dictionaries[ns] = dicts;
       return () => {};
     },
+    bind(ns) {
+      return (key) => dictionaries[ns]?.zh?.[key] ?? key;
+    },
+  },
+  get(name) {
+    return services[name];
   },
   effect(execute) {
     effects.push(execute());
@@ -76,61 +90,101 @@ const ctx = {
 };
 plugin.apply(ctx);
 
-assert.equal(registrations.length, 1, "只注册一个槽位");
-assert.equal(registrations[0].name, "plugins.row.config");
-const registration = registrations[0].callback();
-assert.equal(registration.options.name, "plugins.row.config");
-assert.equal(registration.options.key, "dsh-better-chat-history#io-optimizer");
-assert.equal(registration.options.locale, "ioOptimizer");
-assert.ok(dictionaries.ioOptimizer?.zh && dictionaries.ioOptimizer?.en, "必须注册中英字典");
+assert.deepEqual(
+  registrations.map((item) => item.name),
+  ["plugins.row.config", "settings.section", "settings.section.icon"],
+  "三个槽位都要注册",
+);
+assert.ok(dictionaries[NS]?.zh && dictionaries[NS]?.en, "必须注册中英字典");
 assert.equal(effects.length, 1, "locale 注册要包在 effect 里，卸载时回收");
 
-const ConfigPage = registration.component;
+const byName = Object.fromEntries(registrations.map((item) => [item.name, item.callback()]));
 
-// ── summary 视图 ────────────────────────────────────────────
+// ── 插件页那一行 ────────────────────────────────────────────
+const rowRegistration = byName["plugins.row.config"];
+assert.equal(rowRegistration.options.name, "plugins.row.config");
+assert.equal(rowRegistration.options.key, ROW_KEY);
+assert.equal(rowRegistration.options.locale, NS);
+const ConfigPage = rowRegistration.component;
+
 const summary = ConfigPage({ view: "summary", t: undefined });
 assert.equal(typeof summary.type, "string", "summary 应返回文本节点");
 assert.ok(summary.props.children.length > 0);
 
-// ── 没有 form：降级而不是抛错 ───────────────────────────────
 const unavailable = ConfigPage({ view: "page", form: undefined });
-assert.equal(unavailable.props["data-io-optimizer-unavailable"], true);
+assert.equal(unavailable.props["data-io-optimizer-unavailable"], true, "没有 form 时降级");
 
-// ── 有 form：渲染字段，保存只提交改动并带 revision ──────────
-const calls = [];
-const form = {
-  state: {
-    status: "ready",
-    value: { readCacheSessions: 6, readCacheSessionMb: 8, readCacheSourceMb: 64, listCacheTtlMs: 5000, warmSessions: 8, warmDelayMs: 15000 },
-    revision: "rev-7",
-    writable: true,
-  },
+// ── 设置侧栏分节 ────────────────────────────────────────────
+const sectionRegistration = byName["settings.section"];
+assert.equal(sectionRegistration.options.name, "settings.section");
+assert.equal(sectionRegistration.options.id, SECTION_ID, "分节 id");
+assert.equal(typeof sectionRegistration.options.order, "number", "order 用于排序");
+assert.equal(typeof sectionRegistration.options.label, "function", "label 用 thunk，跟随语言");
+assert.equal(sectionRegistration.options.label(), "加载缓存", "label 走 locale 字典");
+assert.equal(typeof sectionRegistration.options.inject, "function", "注册时注入 forms/t");
+const injected = sectionRegistration.options.inject();
+assert.equal(injected.t("save"), "保存", "注入的 t 走 locale");
+const SettingsSection = sectionRegistration.component;
+
+const iconRegistration = byName["settings.section.icon"];
+assert.equal(iconRegistration.options.id, SECTION_ID, "图标 id 必须等于分节 id");
+const icon = iconRegistration.component({ size: 20, active: true });
+assert.equal(icon.type, "svg", "图标返回 svg");
+assert.equal(icon.props.width, 20, "图标跟随宿主给的 size");
+assert.equal(icon.props["aria-hidden"], "true", "图标对读屏隐藏");
+
+// 服务缺失：说清楚，不抛错
+const noService = SettingsSection({ forms: undefined, t: undefined });
+assert.equal(noService.props["data-io-optimizer-no-service"], true, "缺 configForms 时给提示");
+
+// 命名空间没被 Serve：给 notFound
+const emptyFace = { getSnapshot: () => ({ status: "ready", view: { namespaces: [], writable: true } }), subscribe: () => () => {} };
+const notFound = SettingsSection({ forms: { describe: () => emptyFace, get: () => undefined } });
+assert.equal(notFound.props["data-io-optimizer-not-found"], true, "认不出命名空间时给 notFound");
+
+// 正常路径：从 describe 里认出 include:io-optimizer，渲染同一套字段
+const value = {
+  readCacheSessions: 6, readCacheSessionMb: 8, readCacheSourceMb: 64,
+  listCacheTtlMs: 5000, warmSessions: 8, warmDelayMs: 15000,
+};
+const snapshot = { status: "ready", value, revision: 3, writable: true };
+const mutations = [];
+const controller = {
+  getSnapshot: () => snapshot,
+  subscribe: () => () => {},
   async mutate(ops, revision) {
-    calls.push({ ops, revision });
+    mutations.push({ ops, revision });
     return true;
   },
 };
-const page = ConfigPage({ view: "page", form });
-assert.equal(typeof page.type, "function", "有 form 时应渲染 Fields 组件");
-// 直接调用 Fields：hooks 已被假 React 兜住，拿到的是元素树而不是渲染结果，
-// 所以这里只验证组件是函数且调用不抛错。
-const tree = page.type({ form, formT: undefined });
-assert.ok(tree && tree.props && tree.props["data-io-optimizer-form"] === true, "表单根节点带标记");
+let askedNamespace;
+const configForms = {
+  describe: () => ({
+    getSnapshot: () => ({ status: "ready", view: { namespaces: [{ ns: "include:io-optimizer" }], writable: true } }),
+    subscribe: () => () => {},
+  }),
+  get(ns) {
+    askedNamespace = ns;
+    return controller;
+  },
+};
+const section = SettingsSection({ forms: configForms, t: injected.t });
+assert.equal(askedNamespace, "include:io-optimizer", "应该认出 bundle 行的 Loader id");
+assert.equal(typeof section.type, "function", "拿到控制器后渲染 Fields");
+const tree = section.type({ state: snapshot, mutate: section.props.mutate, formT: undefined });
+assert.equal(tree.props["data-io-optimizer-form"], true, "表单根节点带标记");
 const serialized = JSON.stringify(tree);
 assert.ok(serialized.includes("readCacheSessions"), "表单里应包含字段");
 const fieldCount = (serialized.match(/"io-opt-/g) ?? []).length;
 assert.equal(fieldCount, 12, "六个字段都要渲染出来（label htmlFor + input id 各一处）");
 
-// 保存路径单独验证（不经过 React 事件）
-const ops = [
-  { op: "set", path: ["readCacheSessions"], value: 10 },
-];
-assert.equal(await form.mutate(ops, form.state.revision), true);
-assert.deepEqual(calls.at(-1), { ops, revision: "rev-7" });
+// 保存经控制器走，带 revision
+assert.equal(await section.props.mutate([{ op: "set", path: ["warmSessions"], value: 4 }], snapshot.revision), true);
+assert.deepEqual(mutations.at(-1), { ops: [{ op: "set", path: ["warmSessions"], value: 4 }], revision: 3 });
 
-// ── 关掉表单写入时不许点保存 ────────────────────────────────
-const readonlyPage = ConfigPage({ view: "page", form: { ...form, state: { ...form.state, writable: false } } });
+// 只读时不许点保存（走插件页那条路径验证一次）
+const readonlyPage = ConfigPage({ view: "page", form: { state: { ...snapshot, writable: false }, mutate: controller.mutate } });
 assert.equal(typeof readonlyPage.type, "function");
 
 console.log("✅ client: 所有断言通过");
-console.log(`   注册键 ${registration.options.key}，字段渲染 ${fieldCount} 处`);
+console.log(`   槽位 ${registrations.length} 个，设置分节 id ${SECTION_ID}，字段渲染 ${fieldCount} 处`);
