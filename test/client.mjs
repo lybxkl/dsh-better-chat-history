@@ -147,7 +147,7 @@ const badge = CacheDock({ sessionId: "s-1", t: injected.t });
 assert.ok(badge !== null && badge.props["data-io-optimizer-cached"] === true, "命中缓存时渲染徽标");
 const badgeJson = JSON.stringify(badge);
 assert.ok(badgeJson.includes("已缓存"), "徽标文案走 locale");
-assert.ok(badgeJson.includes("12MB"), "徽标带体积提示");
+assert.ok(badgeJson.includes("12.0MB"), "体积放 title，避免小会话显示成 1MB");
 assert.equal(typeof badge.props.title, "string", "徽标要带说明性 title");
 assert.equal(badge.props["data-io-optimizer-fresh"], true, "新鲜时标 fresh");
 React.__forced = { bytes: 4096, fresh: false };
