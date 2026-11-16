@@ -1,7 +1,7 @@
 # ⚡ dsh-better-chat-history
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.0-2ea44f)
+![Version](https://img.shields.io/badge/version-0.2.1-2ea44f)
 ![DSH](https://img.shields.io/badge/dsh-%3E%3D0.2.2--rc.3-purple)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 
@@ -9,7 +9,7 @@
 
 **零依赖**，纯 JS ESM，不修改 DSH 本体——通过包装既有服务实例方法生效，静默运行。
 
-> **0.2.0 是兼容性重写**：适配 DSH `0.2.2-rc.3+` 的句柄式持久化协议。0.1.x 在 rc.3 上会在启动时直接抛错（`persistence.inspect` 已不存在）。详见 [CHANGELOG](./CHANGELOG.md)。
+> **0.2.1 复查版**：在 0.2.0 的兼容性重写之上修掉四处逻辑问题——超大会话被白读一遍、`readCacheSessions=0` 反而变慢、`AbortSignal` 取消被吞、`exclusive` 事件污染缓存。详见 [CHANGELOG](./CHANGELOG.md)。
 
 ## 🩺 它到底在治什么
 
@@ -17,7 +17,7 @@ DSH 的会话日志是 append-only 的 zstd 分帧文件。每次**冷读**（�
 
 1. 读整个文件 → 逐帧 `zstdDecompressSync`（一个 14 MB 的会话 ≈ 11,000 帧）；
 2. 每帧 `JSON.parse` → 构造完整事件数组；
-3. 后端自带一个**条目数极少**的冷日志 memo，多开几个会话就把它挤爆，于是下一次切换又从第 1 步开始。
+3. 后端自带一个冷日志 memo，但 rc.3 里 `COLD_LOG_MEMO_MAX_ENTRIES = 2`（`dsh-session-persistence-jsonl/src/index.ts:67`）——只要在三个会话之间来回切，memo 就被挤爆，于是下一次切换又从第 1 步开始。
 
 本插件在 `sessionPersistence.open(id, 'read')` 这一层加一层**按 revision 校验的 LRU 读缓存**：命中时直接把内存里的事件数组切片返回，磁盘与解码全部跳过。
 
@@ -39,7 +39,9 @@ return { eventState: read.eventState, header: handle.header, ... }
 - **读缓存（核心）** —— 包装 `open()` 的只读路径：
   - 每次 `open` 先用 `stat(id)` 取 `revision`（后端承诺：revision 相同 ⇒ 日志未变），命中就直接给出缓存句柄，零磁盘 IO；
   - 每次 `read()` 再校验一次 `revision`——正在运行的会话追加事件后立刻可见，**不会拿到陈旧快照**；
-  - 同 id 并发请求去重，预热撞上点击时只解码一次。
+  - 同 `(id, revision)` 并发请求去重，预热撞上点击时只解码一次；不同 revision 的结果绝不互相复用。
+  - **绝不读第二遍**：`open()` 只在这一次读到的数据上做决定——能缓存就缓存，不能缓存（超限、
+    非 `shared-frozen`）也把这次的数据直接交给调用方，不会为了"退回上游"再解码一次。
 - **双预算淘汰** —— LRU 同时按「会话数」和「源文件总字节」限制，并跳过超大会话。解码后的 JS 对象约占源文件的 3~5 倍，不设上限会吃掉几个 GB。
 - **预热器** —— 启动后台把最近活跃的会话读进缓存，让"第一次点击"也命中。
 - **列表缓存** —— `list()` 5 秒 TTL，避免每次刷新 GUI 都扫一遍全部会话头。
@@ -102,14 +104,17 @@ dsh plugin --profile <profile> add ./dsh-better-chat-history
 
 - **只包装只读路径**：`access === 'read'` 才介入；写句柄、`create`、`flush` 原样透传。
 - **缓存不改变读到什么**：每次 `read()` 都用 `revision` 重新校验；revision 一变就重读并刷新。
-- **句柄语义对齐**：`close` 幂等、`append`/`flush` 在只读句柄上拒绝、`eventState` 原样返回、越界 `offset` 返回空数组。
+- **只共享 `shared-frozen` 事件**：事件所有权是 `exclusive` 时，调用方可能就地改写事件对象，
+  此时一律不进缓存（jsonl 后端恒为 `shared-frozen`）。
+- **取消会传播**：被 `AbortSignal` 取消的读取抛 `AbortError`，不会静默返回陈旧数据。
+- **句柄语义对齐**：`close` 幂等、`append`/`flush` 在只读句柄上拒绝、`eventState` 原样返回、越界 `offset` 返回空数组、关闭后 `read()` 抛 `SessionHandleClosedError`。
 - **不共享句柄**：句柄是单所有者状态，插件自己开的句柄读完即关，绝不给调用方复用。
 - **契约不匹配时安静退出**：缺 `open`/`stat` 只打一条 warn，不抛错、不影响会话功能。
 
 ## ✅ 验证
 
 ```sh
-node test/smoke.mjs     # 内置冒烟测试：命中/失效/切片/close/预热/预算
+node test/smoke.mjs     # 内置冒烟测试 13 组：命中/失效/切片/close/预热/预算/超大跳过/exclusive/abort/并发去重
 ```
 
 运行期行为：

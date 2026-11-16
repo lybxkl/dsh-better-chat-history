@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.2.1 — 复查修掉的四类逻辑问题
+
+### 修复
+
+- **超大会话被白读一遍**：`open()` 在 `materialize()` 之后才发现某个会话超出单会话
+  上限，于是先整份解码、再退回上游句柄，等于在大会话上做两次冷读（比不打补丁更慢）。
+  现在先看 `stat().sizeBytes`，超限直接交还上游，一次都不多读。
+- **`readCacheSessions = 0` 时反而变慢**：关缓存后仍会先 `materialize()` 再退回上游。
+  现在该配置会让插件彻底不介入 `open`。
+- **取消被吞掉**：`safeStat()` 原本把所有 `stat` 异常都当作「会话不存在」，导致被
+  `AbortSignal` 取消的 `read()` 静默返回陈旧数据。现在 abort 一律向上抛。
+- **`exclusive` 事件污染缓存**：DSH 的事件所有权是 `SessionSeedEventState`，只有
+  `shared-frozen` 才能跨读者共享；`exclusive` 时调用方可能就地改写事件对象，
+  一旦进缓存就会把改写泄漏给下一个读者。现在只缓存 `shared-frozen`（jsonl 后端始终是它）。
+- **乱序完成覆盖新快照**：两次不同 revision 的读取可能后发先至，先发起的那次若后完成
+  会把更新的条目顶掉。现在条目记录的是**发起时刻**，旧发起的完成时不写回。
+- **并发重复解码**：`inflight` 去重键从 `id` 改为 `(id, revision)`，同一份日志并发只解一次，
+  但不同 revision 绝不互相复用结果（原先会把旧 revision 的结果交给新 revision 的读者）。
+
+### 变更
+
+- `list()` 命中与未命中都返回数组副本，调用方改不动缓存。
+- 配置合并忽略显式 `undefined`，不会再因为补丁里写了空值而把默认值抹成 `undefined`。
+- 关闭句柄后 `read()` 抛出的错误名对齐上游 `SessionHandleClosedError`。
+- 删掉写合并分支里三个未使用的绑定（其中 `void origPut` 之类在旧 DSH 上会直接
+  `ReferenceError`）。
+- `test/smoke.mjs` 扩到 13 组断言：新增超大跳过、`exclusive` 不缓存、abort 传播、
+  并发去重、关闭缓存后不介入。
+
+### 已知边界
+
+- 缓存只在 `read` 访问上生效；`write` 句柄、`create`、`flush` 全部原样透传。
+- 会话被外部删除时，`stat()` 返回 `undefined`，此时沿用最后一次视图（不抛错）。
+
 ## 0.2.0 — 兼容 DSH 0.2.2-rc.3（兼容性重写）
 
 ### 修复

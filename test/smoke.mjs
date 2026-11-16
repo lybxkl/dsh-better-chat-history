@@ -2,8 +2,10 @@
 //   1) 读缓存命中时不重新开门；
 //   2) revision 变化时必须重读（不能拿陈旧快照糊弄正在跑的会话）；
 //   3) 切片、越界、close 后的语义与真实句柄一致；
-//   4) list() TTL 缓存；
-//   5) 预热用的是 snapshot.header.id（rc.3 的 list 返回 snapshot，不是 header）。
+//   4) list() 返回副本，且用的是 snapshot.header.id；
+//   5) 预热用的是 snapshot.header.id（rc.3 的 list 返回 snapshot，不是 header）；
+//   6) 超大会话：不为缓存白读一遍（只解码一次）；
+//   7) eventState 为 exclusive 时不入缓存（事件值可能被调用方就地改写）。
 //
 // 运行：node test/smoke.mjs
 import assert from "node:assert/strict";
@@ -12,8 +14,8 @@ import { apply, stats } from "../lib/index.js";
 const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 造一个最小可用的假后端。 */
-function makeBackend(sessions) {
-  const opens = new Map(); // id -> 次数
+function makeBackend(sessions, { eventState = "shared-frozen" } = {}) {
+  const reads = new Map(); // id -> 真实整份读取次数
   const store = new Map(); // id -> { revision, events, sizeBytes, header }
 
   for (const [id, events] of Object.entries(sessions)) {
@@ -47,7 +49,6 @@ function makeBackend(sessions) {
     async open(id, access) {
       const record = store.get(id);
       if (record === undefined) throw new Error(`not found: ${id}`);
-      opens.set(id, (opens.get(id) ?? 0) + 1);
       let closed = false;
       return {
         id,
@@ -56,7 +57,8 @@ function makeBackend(sessions) {
         access,
         async read(offset = 0) {
           assert.equal(closed, false, "读已关闭的句柄必须报错");
-          return { eventState: "shared-frozen", events: record.events.slice(offset) };
+          reads.set(id, (reads.get(id) ?? 0) + 1);
+          return { eventState, events: record.events.slice(offset).map((event) => ({ ...event })) };
         },
         async append() {
           throw new Error("read-only");
@@ -79,8 +81,8 @@ function makeBackend(sessions) {
       record.events = [...record.events, ...extra];
       record.revision = `${id}@${Number(record.revision.split("@")[1]) + 1}`;
     },
-    openCount(id) {
-      return opens.get(id) ?? 0;
+    readCount(id) {
+      return reads.get(id) ?? 0;
     },
   };
   return service;
@@ -101,13 +103,20 @@ function makeCtx(service, extraServices = {}) {
     on() {
       return () => {};
     },
-    effect(execute, label) {
-      const disposer = execute();
-      effects.push({ disposer, label });
+    effect(execute) {
+      effects.push(execute());
       return () => {};
     },
   };
-  return { ctx, disposeAll: async () => { for (const { disposer } of effects.reverse()) await disposer?.(); } };
+  return { ctx, effects };
+}
+
+/** 走完整的宿主路径：open → read(0) → close，返回事件数。 */
+async function readThrough(service, id) {
+  const handle = await service.open(id, "read");
+  const result = await handle.read(0, undefined);
+  await handle.close();
+  return result;
 }
 
 const events = Array.from({ length: 10 }, (_, i) => ({ seq: i, type: "user/message" }));
@@ -116,37 +125,32 @@ const { ctx } = makeCtx(service);
 apply(ctx, { warmSessions: 0, listCacheTtlMs: 50 });
 
 // ── 1) 首次 open 读盘，第二次必须命中缓存 ────────────────────
-const h1 = await service.open("s1", "read");
-const r1 = await h1.read(0, 4);
-assert.equal(r1.events.length, 4, "切片长度");
-assert.equal(r1.events[0].seq, 0);
+const r1 = await readThrough(service, "s1");
+assert.equal(r1.events.length, 10);
 assert.equal(r1.eventState, "shared-frozen", "eventState 必须原样返回");
-await h1.close();
-assert.equal(service.openCount("s1"), 1, "第一次 open 应读盘一次");
+assert.equal(service.readCount("s1"), 1, "第一次 open 应只读一次");
 
-const h2 = await service.open("s1", "read");
-assert.equal(service.openCount("s1"), 1, "第二次 open 不应再读盘");
-const r2 = await h2.read(0);
+const r2 = await readThrough(service, "s1");
 assert.equal(r2.events.length, 10, "命中缓存仍要拿到完整日志");
+assert.equal(service.readCount("s1"), 1, "第二次 open 不应再读盘");
 
-// ── 2) 越界 offset 返回空数组 ────────────────────────────────
-const beyond = await h2.read(999);
-assert.deepEqual(beyond.events, [], "越界 offset 返回空");
-
-await h2.close();
+// ── 2) 切片与越界 ────────────────────────────────────────────
+const h = await service.open("s1", "read");
+assert.equal((await h.read(0, 4)).events.length, 4, "length 生效");
+assert.equal((await h.read(8)).events.length, 2, "offset 生效");
+assert.deepEqual((await h.read(999)).events, [], "越界 offset 返回空");
+await h.close();
 
 // ── 3) 日志变化后必须重读，不能返回陈旧快照 ──────────────────
 service.bump("s1", [{ seq: 10, type: "user/message" }]);
-const h3 = await service.open("s1", "read");
-const r3 = await h3.read(0);
+const r3 = await readThrough(service, "s1");
 assert.equal(r3.events.length, 11, "revision 变化后必须看到新事件");
-assert.ok(service.openCount("s1") >= 2, "revision 变化后必须重读一次");
-await h3.close();
+assert.equal(service.readCount("s1"), 2, "revision 变化后必须重读一次");
 
 // ── 4) close 之后 read 必须报错 ──────────────────────────────
 const h4 = await service.open("s1", "read");
 await h4.close();
-await assert.rejects(() => h4.read(0), /closed/, "关闭后的句柄必须拒绝读取");
+await assert.rejects(() => h4.read(0), (error) => error.name === "SessionHandleClosedError");
 
 // ── 5) 只读句柄上 append/flush 必须拒绝 ──────────────────────
 const h5 = await service.open("s1", "read");
@@ -154,20 +158,25 @@ await assert.rejects(() => h5.append([]), /read-only/);
 await assert.rejects(() => h5.flush(), /read-only/);
 await h5.close();
 
-// ── 6) list() 返回 snapshot 结构（header.id 在 header 里，不是顶层） ──
-const snapshots = await service.list();
-assert.ok(Array.isArray(snapshots) && snapshots[0].header.id, "list 返回 snapshot.header.id");
+// ── 6) list() 返回副本 ──────────────────────────────────────
+const listedA = await service.list();
+const listedB = await service.list();
+assert.notEqual(listedA, listedB, "两次 list 不能是同一个数组");
+assert.ok(listedA[0].header.id, "list 返回 snapshot.header.id");
 
-// ── 7) 预热：必须用 snapshot.header.id ──────────────────────
+// ── 7) 预热必须用 snapshot.header.id ────────────────────────
 const warmService = makeBackend({ a: events, b: events });
 const { ctx: warmCtx } = makeCtx(warmService);
 apply(warmCtx, { warmSessions: 2, warmDelayMs: 5, warmIntervalMs: 1, readCacheSessions: 4 });
-await tick(80);
-assert.equal(warmService.openCount("a") + warmService.openCount("b"), 2, "预热应打开两个会话");
+await tick(100);
 const warmStats = stats();
-assert.ok(warmStats && warmStats.warmLoaded === 2, `预热计数应为 2，实际 ${warmStats?.warmLoaded}`);
+assert.ok(warmStats.warmLoaded === 2, `预热计数应为 2，实际 ${warmStats.warmLoaded}`);
+assert.equal(warmService.readCount("a"), 1, "预热应把 a 读进缓存");
+// 预热过的会话再打开不应再读盘
+await readThrough(warmService, "a");
+assert.equal(warmService.readCount("a"), 1, "预热后点击应命中缓存");
 
-// ── 8) 超大会话不入缓存（预算保护） ──────────────────────────
+// ── 8) 超大会话：只解码一次，且不入缓存 ─────────────────────
 const bigService = makeBackend({ big: events });
 bigService.stat = async (id) => ({
   header: { id, createdAt: 1 },
@@ -176,15 +185,72 @@ bigService.stat = async (id) => ({
 });
 const { ctx: bigCtx } = makeCtx(bigService);
 apply(bigCtx, { warmSessions: 0, readCacheSessionBytes: 1024 });
-const bigHandle = await bigService.open("big", "read");
-await bigHandle.close();
+const bigResult = await readThrough(bigService, "big");
+assert.equal(bigResult.events.length, 10, "超大会话仍要正常返回内容");
+assert.equal(bigService.readCount("big"), 1, "超大会话不能为缓存白读一遍");
 const bigStats = stats();
-assert.equal(bigStats.openTooLarge, 1, "超大会话必须走 tooLarge 分支且不入缓存");
+assert.equal(bigStats.openTooLarge, 1);
 assert.equal(bigStats.cachedSessions, 0, "超大会话不应进缓存");
 
-// ── 9) 未启用（服务缺 open/stat）时不能抛错 ──────────────────
+// ── 9) eventState=exclusive 时不入缓存（避免手工改写互相污染） ──
+const exclusiveService = makeBackend({ ex: events }, { eventState: "exclusive" });
+const { ctx: exclusiveCtx } = makeCtx(exclusiveService);
+apply(exclusiveCtx, { warmSessions: 0 });
+const exFirst = await readThrough(exclusiveService, "ex");
+exFirst.events[0].seq = 999; // 独占语义下调用方可以就地改写
+const exSecond = await readThrough(exclusiveService, "ex");
+assert.equal(exSecond.events[0].seq, 0, "exclusive 事件不能被上一个读者污染");
+assert.equal(exclusiveService.readCount("ex"), 2, "exclusive 每次都应重新读");
+
+// ── 10) 契约不匹配时不能抛错 ────────────────────────────────
 const { ctx: badCtx } = makeCtx({ async list() { return []; } });
 assert.doesNotThrow(() => apply(badCtx, {}), "契约不匹配时应安静退出而不是抛错");
+
+// ── 11) 关闭缓存（readCacheSessions=0）时完全不介入 ─────────
+const offService = makeBackend({ z: events });
+const { ctx: offCtx } = makeCtx(offService);
+apply(offCtx, { warmSessions: 0, readCacheSessions: 0 });
+await readThrough(offService, "z");
+await readThrough(offService, "z");
+assert.equal(offService.readCount("z"), 2, "关闭缓存后每次都应走上游");
+
+// ── 12) 被取消的读取必须抛错，不能静默返回陈旧数据 ─────────
+const abortService = makeBackend({ ab: events });
+const innerStat = abortService.stat.bind(abortService);
+abortService.stat = async (id, options) => {
+  if (options?.signal !== undefined) {
+    const error = new Error("aborted");
+    error.name = "AbortError";
+    options.signal.aborted = true; // 模拟取消发生在 stat 期间
+    throw error;
+  }
+  return innerStat(id);
+};
+const { ctx: abortCtx } = makeCtx(abortService);
+apply(abortCtx, { warmSessions: 0 });
+await readThrough(abortService, "ab"); // 先正常读一次，让缓存热起来
+const abortHandle = await abortService.open("ab", "read");
+const signal = { aborted: false, throwIfAborted() {} };
+await assert.rejects(
+  () => abortHandle.read(0, undefined, { signal }),
+  (error) => error.name === "AbortError",
+  "取消必须向上传播",
+);
+await abortHandle.close();
+
+// ── 13) 同一会话并发打开只解码一次 ──────────────────────────
+const dedupeService = makeBackend({ d: events });
+const { ctx: dedupeCtx } = makeCtx(dedupeService);
+apply(dedupeCtx, { warmSessions: 0 });
+const [dh1, dh2] = await Promise.all([
+  dedupeService.open("d", "read"),
+  dedupeService.open("d", "read"),
+]);
+await dh1.read(0);
+await dh2.read(0);
+await dh1.close();
+await dh2.close();
+assert.equal(dedupeService.readCount("d"), 1, "并发同会话只应解码一次");
 
 console.log("✅ smoke: 所有断言通过");
 console.log("   stats:", JSON.stringify(stats()));
