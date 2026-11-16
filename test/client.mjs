@@ -10,6 +10,9 @@
 //      服务缺失 / 命名空间没被 Serve 时给的是说明文字，不是异常。
 //
 // 运行：node test/client.mjs
+// 测试不要污染真实诊断日志（%TEMP%\io-opt-diag.log）。
+process.env.IO_OPT_DIAG = "off";
+
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";

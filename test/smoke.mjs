@@ -8,6 +8,9 @@
 //   7) eventState 为 exclusive 时不入缓存（事件值可能被调用方就地改写）。
 //
 // 运行：node test/smoke.mjs
+// 测试不要污染真实诊断日志（%TEMP%\io-opt-diag.log）。
+process.env.IO_OPT_DIAG = "off";
+
 import assert from "node:assert/strict";
 import { apply, normalizeConfig, stats, unwrapVolatile } from "../lib/index.js";
 
