@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.2 — 量一下「切换到底慢在哪」（临时探针）
+
+宿主侧已证切换零解码（`observeSession` 0–2ms），剩下的慢只能在浏览器渲染。这一版加了一个**只上报、不改行为**的探针：
+
+- 浏览器半插件在会话 id 变化时，用双 `requestAnimationFrame` 量「切过去 → 首帧可见」的毫秒数，
+  并用 `PerformanceObserver('longtask')` 记录这段时间里最长的一次长任务。
+- 结果 POST 到新路由 `/io-optimizer/client-timing`（只接受 POST、body ≤ 2KB、字段按类型取），
+  宿主写一行 `client switch id=… first=no paint=…ms long=…ms` 进诊断日志。
+- 页面首次加载不算切换，不上报。
+
+验证完可以整段摘掉（`useSwitchTiming` + 该路由）。
 ## 0.7.1 — 徽标该绿的终于会绿
 
 0.7.0 把「切会话预热」改成命中只续 TTL，本意是重复打开不重解。但 live 会话（正挂在宿主内存、还在写入的）

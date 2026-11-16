@@ -34,6 +34,9 @@ const React = {
     return [value, () => {}];
   },
   useEffect() {},
+  useRef(initial) {
+    return { current: initial };
+  },
 };
 
 let loaded;
