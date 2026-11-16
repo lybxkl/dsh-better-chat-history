@@ -18,7 +18,8 @@ const tick = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 造一个最小可用的假后端。 */
 function makeBackend(sessions, { eventState = "shared-frozen" } = {}) {
-  const reads = new Map(); // id -> 真实整份读取次数
+  const reads = new Map(); // id -> 真实读取次数
+  const offsets = []; // 每次 read 的起始偏移
   const store = new Map(); // id -> { revision, events, sizeBytes, header }
 
   for (const [id, events] of Object.entries(sessions)) {
@@ -61,6 +62,7 @@ function makeBackend(sessions, { eventState = "shared-frozen" } = {}) {
         async read(offset = 0) {
           assert.equal(closed, false, "读已关闭的句柄必须报错");
           reads.set(id, (reads.get(id) ?? 0) + 1);
+          offsets.push({ id, offset });
           return { eventState, events: record.events.slice(offset).map((event) => ({ ...event })) };
         },
         async append() {
@@ -82,10 +84,15 @@ function makeBackend(sessions, { eventState = "shared-frozen" } = {}) {
     bump(id, extra) {
       const record = store.get(id);
       record.events = [...record.events, ...extra];
+      // 追加日志：体积只会变大，这样才能测出「只补尾巴」的增量路径。
+      record.sizeBytes = (record.sizeBytes ?? 1024) + extra.length * 256;
       record.revision = `${id}@${Number(record.revision.split("@")[1]) + 1}`;
     },
     readCount(id) {
       return reads.get(id) ?? 0;
+    },
+    readOffsets() {
+      return offsets;
     },
   };
   return service;
@@ -370,9 +377,21 @@ console.log("   stats:", JSON.stringify(finalStats));
   await readThrough(backend, "race");
   assert.equal(backend.readCount("race"), 1, "切回来命中缓存，未重新读取");
 
+  // 已在缓存里的会话，日志又长了：切换时只续 TTL，不重新解码
+  backend.bump("race", [{ seq: 3 }]);
+  await query.observeSession("race");
+  await tick(40);
+  assert.equal(backend.readCount("race"), 1, "缓存里已有的会话重复切换只续 TTL");
+
+  // 真正读的时候内容变了：只补尾巴（从已缓存的事件数开始读），不重解整份
+  const page = await readThrough(backend, "race");
+  assert.equal(backend.readCount("race"), 2, "内容变了才回后端，且只一次");
+  assert.equal(backend.readOffsets().at(-1).offset, 2, "增量补尾巴：起点等于已缓存事件数");
+  assert.equal(page.events.length, 3, "补完后事件数正确");
+
   // 归档：缓存立刻作废，下一次读必须回后端
   assert.equal(typeof archived, "function", "必须监听 workspace/session-archived");
   archived({ sessionId: "race" });
   await readThrough(backend, "race");
-  assert.equal(backend.readCount("race"), 2, "归档后缓存清空，重新读取");
+  assert.equal(backend.readCount("race"), 3, "归档后缓存清空，重新读取");
 }
