@@ -137,10 +137,14 @@ assert.equal(icon.props["aria-hidden"], "true", "图标对读屏隐藏");
 const noService = SettingsSection({ forms: undefined, t: undefined });
 assert.equal(noService.props["data-io-optimizer-no-service"], true, "缺 configForms 时给提示");
 
-// 命名空间没被 Serve：给 notFound
+// 命名空间没被 Serve：给 notFound，并把可用命名空间列出来
 const emptyFace = { getSnapshot: () => ({ status: "ready", view: { namespaces: [], writable: true } }), subscribe: () => () => {} };
 const notFound = SettingsSection({ forms: { describe: () => emptyFace, get: () => undefined } });
 assert.equal(notFound.props["data-io-optimizer-not-found"], true, "认不出命名空间时给 notFound");
+
+const otherFace = { getSnapshot: () => ({ status: "ready", view: { namespaces: [{ ns: "someone-else" }], writable: true } }), subscribe: () => () => {} };
+const hinted = SettingsSection({ forms: { describe: () => otherFace, get: () => undefined } });
+assert.ok(String(hinted.props.children).includes("someone-else"), "认不出时应列出可用命名空间，便于诊断");
 
 // 正常路径：从 describe 里认出 include:io-optimizer，渲染同一套字段
 const value = {
@@ -181,6 +185,22 @@ assert.equal(fieldCount, 12, "六个字段都要渲染出来（label htmlFor + i
 // 保存经控制器走，带 revision
 assert.equal(await section.props.mutate([{ op: "set", path: ["warmSessions"], value: 4 }], snapshot.revision), true);
 assert.deepEqual(mutations.at(-1), { ops: [{ op: "set", path: ["warmSessions"], value: 4 }], revision: 3 });
+
+// id 完全不像时，按字段形状兜底认领
+let shapeNamespace;
+const shapeForms = {
+  describe: () => ({
+    getSnapshot: () => ({ status: "ready", view: { namespaces: [{ ns: "totally-different-id", value: { warmDelayMs: 15000 } }], writable: true } }),
+    subscribe: () => () => {},
+  }),
+  get(ns) {
+    shapeNamespace = ns;
+    return controller;
+  },
+};
+const shaped = SettingsSection({ forms: shapeForms, t: injected.t });
+assert.equal(shapeNamespace, "totally-different-id", "id 不像时也要按值里的字段认出来");
+assert.equal(typeof shaped.type, "function", "形状匹配成功后同样渲染 Fields");
 
 // 只读时不许点保存（走插件页那条路径验证一次）
 const readonlyPage = ConfigPage({ view: "page", form: { state: { ...snapshot, writable: false }, mutate: controller.mutate } });
