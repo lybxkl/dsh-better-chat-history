@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.6 — 诊断探针（临时）
+
+- 运行期实测：`Config` 没被 DSH 认到（Config inspect 报 `absent`），但同样代码脱离 DSH
+  用 `createRequire(import.meta.url)` 却能正常拿到 schemastery。怀疑宿主（尤其 HMR 或
+  非 file:// 的模块 URL）下这条解析路径不成立。现在改成按 `import.meta.url` → `cwd` →
+  app.asar 三个基准依次尝试，并把每次的结果记下来。
+- `apply()` 里加临时探针，把下面这些事实写到 `%TEMP%\io-opt-diag.log`：
+  模块 URL、schema 从哪条基准加载成功、`Config` 是否成立、entry id 与 fiber 状态、
+  `runtime` 的导出名，以及 10 秒后 `settings.describe()` 的完整 ns 列表和本插件是否在其中。
+- 探针只写临时文件，失败也不影响插件功能；确认问题后会在下一版删掉。
+
 ## 0.3.5 — 字段标 volatile，设置页才有东西可填
 
 - **根因**：DSH 的 settings 服务只把插件 Config 里声明了 `.volatile()` 的字段投影成表单
