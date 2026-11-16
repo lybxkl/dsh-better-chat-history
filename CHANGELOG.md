@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 — 在插件页里直接调参
+
+### 新增
+
+- **设置面板**：`plugins.row.config` 槽位（键 `dsh-better-chat-history#io-optimizer`）。
+  在 **插件 → 更好的聊天记录加载 → io-optimizer 行 → 配置** 里改六个参数，
+  保存即写入 profile 的 `cordis.patch.yml` 并重启本插件。
+- **配置 schema**：Host 端 `export const Config`（schemastery）。DSH 由此知道哪些字段
+  可编辑、默认值是多少；schema 拿不到时（例如脱离 DSH 单独 import）自动降级为无面板。
+- **MB 单位**：对外用 `readCacheSessionMb` / `readCacheSourceMb`，内部仍按字节计算，
+  旧的 `readCacheSessionBytes` / `readCacheSourceBytes` 继续可用（两者都给时 MB 优先）。
+- 浏览器半个插件、`./client` 导出、`locale/{zh,en}.json`（插件页标题与描述）。
+
+### 修复
+
+- **配置改动后可能整体失效**：原先用一个挂在服务上的布尔量挡重复安装。改配置会重启插件，
+  若新实例先于旧实例的 dispose 执行，新实例会跳过安装、随后旧实例把 `open` 还原成原生方法，
+  读缓存就此静默关闭。现在改为「总是安装 + 卸载时按身份校验只撤自己这一层」，
+  原始方法锚在服务的 `Symbol.for('dsh-better-chat-history.originals')` 上，跨实例共享。
+
 ## 0.2.1 — 复查修掉的四类逻辑问题
 
 ### 修复

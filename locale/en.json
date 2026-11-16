@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Better chat history loading",
+    "description": "Reuses already-decoded session logs so switching sessions skips the full JSONL cold read. Tune the cache and warm-up on its Plugins page."
+  }
+}

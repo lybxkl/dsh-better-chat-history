@@ -1,7 +1,7 @@
 # ⚡ dsh-better-chat-history
 
 ![License](https://img.shields.io/badge/license-MIT-blue)
-![Version](https://img.shields.io/badge/version-0.2.1-2ea44f)
+![Version](https://img.shields.io/badge/version-0.3.0-2ea44f)
 ![DSH](https://img.shields.io/badge/dsh-%3E%3D0.2.2--rc.3-purple)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
 
@@ -9,7 +9,7 @@
 
 **零依赖**，纯 JS ESM，不修改 DSH 本体——通过包装既有服务实例方法生效，静默运行。
 
-> **0.2.1 复查版**：在 0.2.0 的兼容性重写之上修掉四处逻辑问题——超大会话被白读一遍、`readCacheSessions=0` 反而变慢、`AbortSignal` 取消被吞、`exclusive` 事件污染缓存。详见 [CHANGELOG](./CHANGELOG.md)。
+> **0.3.0**：参数可以在 GUI 里改——**插件页 → 本插件 → io-optimizer 行 → 配置**，保存即写回 profile 并重启插件。详见 [CHANGELOG](./CHANGELOG.md)。
 
 ## 🩺 它到底在治什么
 
@@ -87,13 +87,17 @@ dsh plugin --profile <profile> add ./dsh-better-chat-history
 
 ## ⚙️ 配置项
 
-在 bundle patch 的 `io-optimizer` 行加 `config` 覆盖：
+两种改法，效果一样：
+
+1. **图形界面（推荐）**：**插件 → 更好的聊天记录加载 → io-optimizer 行 → 配置**。
+   保存后写进 profile 的 `cordis.patch.yml`，本插件随即重启并重新预热。
+2. **手写 patch**：在 `io-optimizer` 行加 `config` 覆盖：
 
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `readCacheSessions` | `6` | 最多缓存几个会话（0 关闭读缓存） |
-| `readCacheSourceBytes` | `64 MiB` | 缓存会话的源文件总预算 |
-| `readCacheSessionBytes` | `8 MiB` | 单个会话的源文件上限，超过就不缓存（避免大对象驻留） |
+| `readCacheSourceMb` | `64` | 缓存会话的源文件总预算（MB）；旧名 `readCacheSourceBytes` 仍可用 |
+| `readCacheSessionMb` | `8` | 单个会话的源文件上限（MB），超过就不缓存（避免大对象驻留）；旧名 `readCacheSessionBytes` 仍可用 |
 | `listCacheTtlMs` | `5000` | 会话列表缓存 TTL |
 | `warmSessions` | `8` | 启动后预热的最近会话数（0 关闭） |
 | `warmDelayMs` | `15000` | 预热开始延迟（避开启动高峰） |
