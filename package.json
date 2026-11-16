@@ -1,7 +1,7 @@
 {
   "name": "dsh-better-chat-history",
-  "version": "0.1.0",
-  "description": "更好的聊天记录加载 —— DeepSeek Harness 会话 I/O 优化插件：读路径缓存（inspect/readFrom/list）消除切换会话时的 JSONL 全量冷读，投影缓存写合并减少磁盘写放大，延长 SSD 寿命。零依赖。",
+  "version": "0.2.0",
+  "description": "更好的聊天记录加载 —— DeepSeek Harness 会话 I/O 优化插件。兼容 DSH 0.2.2-rc.3+：包装 sessionPersistence.open() 的只读路径，用 revision 校验的 LRU 读缓存消除切换会话时的 JSONL 全量冷读（zstd 逐帧解压 + JSON 解析）。零依赖。",
   "license": "MIT",
   "type": "module",
   "main": "./lib/index.js",
@@ -9,6 +9,9 @@
     ".": "./lib/index.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
+  },
+  "scripts": {
+    "test": "node test/smoke.mjs"
   },
   "dsh": {
     "bundle": {
@@ -19,9 +22,10 @@
     "lib",
     "cordis.patch.yml",
     "dsh.plugin.json",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "engines": {
-    "dsh": ">=0.1.0-rc.6"
+    "dsh": ">=0.2.2-rc.3"
   }
 }

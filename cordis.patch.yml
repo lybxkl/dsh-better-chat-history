@@ -1,31 +1,44 @@
 # 更好的聊天记录加载 —— bundle patch。
 #
-# 做两件事：
-# 1) 覆盖持久化配置，降低写盘频率、扩大冷读缓存（本层在 dsh-base / dsh-web-app
-#    之后加载，按 id 覆盖整行 config，所以必须重述 root）。
-# 2) 挂载 io-optimizer 插件本体（读缓存 + 写合并）。
+# 本文件只做两件事：
+#   1) 覆盖 session-persistence-jsonl 的 root（必须是 dsh 的 sessions 目录，
+#      原配置里 root 是必填且没有默认值）。
+#   2) 给 session-projection-cache 设置写入节流，把"每回合一次全文件重写"
+#      降到"每 N 个事件或 N 毫秒一次"。该缓存是 fail-soft 的（丢了只是冷读时
+#      重放日志），安全。
+#   3) 挂载 io-optimizer 插件本体（读缓存 + 预热）。
 #
-# 若通过 `dsh plugin --profile web add <本包>` 安装，本 patch 会被自动加载；
-# 也可以把下面三行手动合并进 profile 自己的 cordis.patch.yml（效果相同）。
+# 注意（DSH 0.2.2-rc.3+）：
+#   - session-persistence-jsonl 的 Config 只有 root / compression /
+#     listConcurrency 三项，旧版的 preparedSessionCacheSize 与
+#     writeBatchMaxDelayMs 已被移除，写在这里会被静默忽略，故删除。
+#     冷读缓存现在是后端内部的 COLD_LOG_MEMO_MAX_ENTRIES 常量，无法通过
+#     配置调整，改由本插件的读缓存覆盖。
+#   - storage 的 kv unit 不再暴露 publish/state/assertOpen，所以插件里的
+#     写合并会自行检测并跳过；投影缓存的写频率完全由下面这几行控制。
 
 - id: session-persistence-jsonl
   config:
     root: !!js dshHomePath('sessions')
-    # 冷读 LRU 容量：默认 5，多 Agent 来回切换必 miss；64 覆盖典型多 Agent 规模。
-    preparedSessionCacheSize: 64
-    # 追加写批处理窗口：默认 200ms。调大后同一窗口内的事件合并为更少的
-    # 文件写 + fsync（崩溃最多丢最近 ~2s 的事件，UI 实时性不受影响——
-    # 事件流先走内存，持久化只是落盘）。
-    writeBatchMaxDelayMs: 2000
 
 - id: session-projection-cache
   config:
-    # 投影缓存是全量重写整个 session_projcache.json，写放大明显。
-    # 调大触发阈值 + 配合插件的写合并，把"每回合一次全文件重写"降到
-    # "每 ~15s 一次"。该缓存是 fail-soft 的（丢了只是冷读时重放日志），安全。
+    # 攒够 500 个事件才落盘一次
     writeEveryEvents: 500
+    # 或者每 15s 落盘一次（两者先到先触发）
     writeIntervalMs: 15000
 
 - insert:
     - id: io-optimizer
       name: 'dsh-better-chat-history'
+      config:
+        # 读缓存：最多缓存 6 个会话，源文件总量 64MB，单会话上限 8MB。
+        # 冷读会把整份事件数组交给调用方，缓存里再留一份；
+        # 解码后的 JS 对象约占源文件的 3~5 倍，别把上限放太大。
+        readCacheSessions: 6
+        readCacheSourceBytes: 67108864
+        readCacheSessionBytes: 8388608
+        # 启动 15s 后预热最近 8 个会话，让第一次点击就命中
+        warmSessions: 8
+        warmDelayMs: 15000
+        warmIntervalMs: 400
