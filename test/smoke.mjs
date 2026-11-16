@@ -377,16 +377,16 @@ console.log("   stats:", JSON.stringify(finalStats));
   await readThrough(backend, "race");
   assert.equal(backend.readCount("race"), 1, "切回来命中缓存，未重新读取");
 
-  // 已在缓存里的会话，日志又长了：切换时只续 TTL，不重新解码
+  // 已在缓存里的会话日志又长了：切换时增量补尾巴，不重解整份
   backend.bump("race", [{ seq: 3 }]);
   await query.observeSession("race");
   await tick(40);
-  assert.equal(backend.readCount("race"), 1, "缓存里已有的会话重复切换只续 TTL");
+  assert.equal(backend.readCount("race"), 2, "内容变了：切换时只补一次尾巴");
+  assert.equal(backend.readOffsets().at(-1).offset, 2, "补尾巴的起点 = 已缓存事件数");
 
-  // 真正读的时候内容变了：只补尾巴（从已缓存的事件数开始读），不重解整份
+  // 补完之后再读：命中，不再回后端
   const page = await readThrough(backend, "race");
-  assert.equal(backend.readCount("race"), 2, "内容变了才回后端，且只一次");
-  assert.equal(backend.readOffsets().at(-1).offset, 2, "增量补尾巴：起点等于已缓存事件数");
+  assert.equal(backend.readCount("race"), 2, "补完即命中，不再回后端");
   assert.equal(page.events.length, 3, "补完后事件数正确");
 
   // 归档：缓存立刻作废，下一次读必须回后端
